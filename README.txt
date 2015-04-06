@@ -1,0 +1,3 @@
+This project contains the source code for the SOLA Portable Control Panel. The Control Panel can be used as part of the SOLA Portable package to start and stop the Postgresql database and the Glassfish application server which are required services for running SOLA applications. It also captures the log file output from these applications to assist with tracing errors and resolving environment issues.
+
+To use the Control Panel you should download the SOLAPortable package. Alternatively you can change the settings in the config.properties file so the Control Panel runs command scripts customized for your environment. E.g. you can change the scripts to run Postgresql and Glassfish if these services are already installed on you computer. 
