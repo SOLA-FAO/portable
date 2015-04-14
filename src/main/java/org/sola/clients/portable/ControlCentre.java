@@ -59,7 +59,7 @@ public class ControlCentre extends javax.swing.JFrame {
 
     private static final String SCRIPTS_FOLDER = "SCRIPTS_FOLDER";
     private static final String LOGS_FOLDER = "LOGS_FOLDER";
-    private static final int SLEEP = 1000;
+    private static final int SLEEP = 2000;
     Tailer glassfishTailer = null;
     Thread glassfishTailerThread = null;
     private boolean moduleStateError = false;
@@ -247,7 +247,7 @@ public class ControlCentre extends javax.swing.JFrame {
                                 + " Wait for Glassfish to complete its startup, then stop Glassfish and delete "
                                 + "the folder called generated in glassfish/glassfish/domains/domain1. "
                                 + "Once the generated folder is deleted, restart Glassfish again. " + System.lineSeparator());
-                    } else if (line.matches("(.*)Loading application sola-sl-services-ear done in(.*)")) {
+                    } else if (line.matches("(.*)Loading application sola-(.*)services-ear done in(.*)")) {
                         // Checks when Glassfish is completely started up
                         writeUserMessage("Glassfish is now running");
                         setGlassfishRunning(true);
