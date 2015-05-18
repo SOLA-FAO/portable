@@ -9,5 +9,5 @@ chcp 1252 > nul
 for %%? in ("%~dp0..\glassfish") do set APPBASE=%%~f?
 
 cd "%APPBASE%\bin"
-".\asadmin" start-domain
+".\asadmin" start-domain domain1
 

@@ -29,6 +29,7 @@
  */
 package org.sola.clients.portable;
 
+import java.awt.Desktop;
 import java.awt.Image;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -40,6 +41,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -59,14 +61,18 @@ public class ControlCentre extends javax.swing.JFrame {
 
     private static final String SCRIPTS_FOLDER = "SCRIPTS_FOLDER";
     private static final String LOGS_FOLDER = "LOGS_FOLDER";
+    private static final String SHOW_DESKTOP = "SHOW_DESKTOP";
     private static final int SLEEP = 2000;
     Tailer glassfishTailer = null;
     Thread glassfishTailerThread = null;
+    Tailer geoserverTailer = null;
+    Thread geoserverTailerThread = null;
     private boolean moduleStateError = false;
     boolean startServers = false;
     boolean stopServers = false;
     boolean glassfishRunning = false;
     boolean databaseRunning = false;
+    boolean geoserverRunning = false;
     boolean close = false;
 
     /**
@@ -93,6 +99,11 @@ public class ControlCentre extends javax.swing.JFrame {
             iconList.add(img.getImage());
         }
         this.setIconImages(iconList);
+        
+        if (getConfig(SHOW_DESKTOP, "Y").equals("N")) {
+            tabMain.removeTabAt(tabMain.indexOfComponent(tabDesktop));
+            btnStartDesktopA.setVisible(false);  
+        }
     }
 
     /**
@@ -156,6 +167,14 @@ public class ControlCentre extends javax.swing.JFrame {
                                     writeUserMessage("Glassfish is already running.");
                                     setGlassfishRunning(true);
                                 }
+                            } else if (displayLog == txtGeoserverLog) {
+                                if (line.matches("(.*)Command stop-domain executed successfully(.*)")) {
+                                    writeUserMessage("Geoserver has shutdown");
+                                    setGeoserverRunning(false);
+                                } else if (line.matches("(.*)There is a process already using the admin port 4849(.*)")) {
+                                    writeUserMessage("Geoserver is already running.");
+                                    setGeoserverRunning(true);
+                                }
                             }
                             if (line != null) {
                                 displayLog.append(line + System.lineSeparator());
@@ -201,12 +220,28 @@ public class ControlCentre extends javax.swing.JFrame {
         glassfishRunning = isRunning;
         if (isRunning) {
             tabMain.setIconAt(tabMain.indexOfComponent(tabGlassfish), new ImageIcon(this.getClass().getResource("/images/status.png")));
+            if (startServers) {
+                startGeoserver();
+            }
+        } else {
+            if (stopServers) {
+                // Stop the database once Glassfish has stopped. 
+                stopGeoserver();
+            }
+            tabMain.setIconAt(tabMain.indexOfComponent(tabGlassfish), new ImageIcon(this.getClass().getResource("/images/status-busy.png")));
+        }
+    }
+    
+    private void setGeoserverRunning(boolean isRunning) {
+        geoserverRunning = isRunning;
+        if (isRunning) {
+            tabMain.setIconAt(tabMain.indexOfComponent(tabGeoserver), new ImageIcon(this.getClass().getResource("/images/status.png")));
         } else {
             if (stopServers) {
                 // Stop the database once Glassfish has stopped. 
                 stopDatabase();
             }
-            tabMain.setIconAt(tabMain.indexOfComponent(tabGlassfish), new ImageIcon(this.getClass().getResource("/images/status-busy.png")));
+            tabMain.setIconAt(tabMain.indexOfComponent(tabGeoserver), new ImageIcon(this.getClass().getResource("/images/status-busy.png")));
         }
     }
 
@@ -238,7 +273,7 @@ public class ControlCentre extends javax.swing.JFrame {
 
             @Override
             public void handle(String line) {
-                if (displayLog == txtGlassfishLog) {
+                if (displayLog == txtGlassfishLog || displayLog == txtGeoserverLog) {
                     // Check for known Exception messages in the message line
                     if (line.matches("(.*)-- Inconsistent Module State(.*)")) {
                         moduleStateError = true;
@@ -251,6 +286,10 @@ public class ControlCentre extends javax.swing.JFrame {
                         // Checks when Glassfish is completely started up
                         writeUserMessage("Glassfish is now running");
                         setGlassfishRunning(true);
+                    } else if (line.matches("(.*)Loading application geoserver done in(.*)")) {
+                        // Checks when Glassfish is completely started up
+                        writeUserMessage("Geoserver is now running");
+                        setGeoserverRunning(true);
                     }
                 }
                 // Auto scroll the display log to the bottom as each line is added. 
@@ -332,7 +371,6 @@ public class ControlCentre extends javax.swing.JFrame {
         writeUserMessage("Starting up Glassfish. This can take 1 to 2 minutes. Please wait...");
         tabMain.setIconAt(tabMain.indexOfComponent(tabGlassfish), new ImageIcon(this.getClass().getResource("/images/status-away.png")));
         moduleStateError = false;
-        startServers = false;
         tabMain.setSelectedIndex(tabMain.indexOfComponent(tabGlassfish));
         txtGlassfishLog.setText("");
         // The location of the logs folder can be overriden in config.properties. 
@@ -357,6 +395,38 @@ public class ControlCentre extends javax.swing.JFrame {
             if (glassfishTailerThread != null) {
                 glassfishTailerThread.interrupt();
                 glassfishTailerThread = null;
+            }
+        }
+    }
+    
+    private void startGeoserver() {
+        writeUserMessage("Starting up Geoserver. This can take 1 to 2 minutes. Please wait...");
+        tabMain.setIconAt(tabMain.indexOfComponent(tabGeoserver), new ImageIcon(this.getClass().getResource("/images/status-away.png")));
+        tabMain.setSelectedIndex(tabMain.indexOfComponent(tabGeoserver));
+        txtGeoserverLog.setText("");
+        startServers = false;
+        // The location of the logs folder can be overriden in config.properties. 
+        geoserverTailer = createTailer(txtGeoserverLog, getConfig(LOGS_FOLDER, "./logs") + "/geoserver.log");
+        geoserverTailerThread = new Thread(geoserverTailer);
+        geoserverTailerThread.start();
+        // The location of the scripts folder can be overriden in config.properties. 
+        runProcess(txtGeoserverLog, getConfig(SCRIPTS_FOLDER, "./scripts") + "/geoserver-start.cmd");
+    }
+
+    private void stopGeoserver() {
+        try {
+            tabMain.setSelectedIndex(tabMain.indexOfComponent(tabGeoserver));
+            // The location of the scripts folder can be overriden in config.properties. 
+            runProcess(txtGeoserverLog, getConfig(SCRIPTS_FOLDER, "./scripts") + "/geoserver-stop.cmd");
+        } finally {
+            // Make sure the geoserverTrailer is stopped and the thread killed off/interrupted.  
+            if (geoserverTailer != null) {
+                geoserverTailer.stop();
+                geoserverTailer = null;
+            }
+            if (geoserverTailerThread != null) {
+                geoserverTailerThread.interrupt();
+                geoserverTailerThread = null;
             }
         }
     }
@@ -434,6 +504,16 @@ public class ControlCentre extends javax.swing.JFrame {
         btnStartDesktopB = new javax.swing.JButton();
         jSeparator9 = new javax.swing.JToolBar.Separator();
         btnDesktopCopy = new javax.swing.JButton();
+        tabGeoserver = new javax.swing.JPanel();
+        jToolBar5 = new javax.swing.JToolBar();
+        btnStartGeoserver = new javax.swing.JButton();
+        jSeparator10 = new javax.swing.JToolBar.Separator();
+        btnStopGeoserver = new javax.swing.JButton();
+        jSeparator11 = new javax.swing.JToolBar.Separator();
+        btnGeoserverCopy = new javax.swing.JButton();
+        btnGeoserverAdminConsole = new javax.swing.JButton();
+        jScrollPane5 = new javax.swing.JScrollPane();
+        txtGeoserverLog = new javax.swing.JTextArea();
         tabGlassfish = new javax.swing.JPanel();
         jPanel5 = new javax.swing.JPanel();
         jScrollPane3 = new javax.swing.JScrollPane();
@@ -444,6 +524,7 @@ public class ControlCentre extends javax.swing.JFrame {
         btnStopGlassfish = new javax.swing.JButton();
         jSeparator6 = new javax.swing.JToolBar.Separator();
         btnGlassfishCopy = new javax.swing.JButton();
+        btnGlassfishAdminConsole = new javax.swing.JButton();
         tabDatabase = new javax.swing.JPanel();
         jPanel3 = new javax.swing.JPanel();
         jScrollPane2 = new javax.swing.JScrollPane();
@@ -540,6 +621,76 @@ public class ControlCentre extends javax.swing.JFrame {
 
         tabMain.addTab(bundle.getString("ControlCentre.tabDesktop.TabConstraints.tabTitle"), tabDesktop); // NOI18N
 
+        jToolBar5.setFloatable(false);
+        jToolBar5.setRollover(true);
+
+        btnStartGeoserver.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/control.png"))); // NOI18N
+        btnStartGeoserver.setText(bundle.getString("ControlCentre.btnStartGeoserver.text")); // NOI18N
+        btnStartGeoserver.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnStartGeoserverActionPerformed(evt);
+            }
+        });
+        jToolBar5.add(btnStartGeoserver);
+        jToolBar5.add(jSeparator10);
+
+        btnStopGeoserver.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/control-stop.png"))); // NOI18N
+        btnStopGeoserver.setText(bundle.getString("ControlCentre.btnStopGeoserver.text")); // NOI18N
+        btnStopGeoserver.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnStopGeoserverActionPerformed(evt);
+            }
+        });
+        jToolBar5.add(btnStopGeoserver);
+        jToolBar5.add(jSeparator11);
+
+        btnGeoserverCopy.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/scripts.png"))); // NOI18N
+        btnGeoserverCopy.setText(bundle.getString("ControlCentre.btnGeoserverCopy.text")); // NOI18N
+        btnGeoserverCopy.setFocusable(false);
+        btnGeoserverCopy.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnGeoserverCopy.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnGeoserverCopyActionPerformed(evt);
+            }
+        });
+        jToolBar5.add(btnGeoserverCopy);
+
+        btnGeoserverAdminConsole.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/eraser.png"))); // NOI18N
+        btnGeoserverAdminConsole.setText(bundle.getString("ControlCentre.btnGeoserverAdminConsole.text")); // NOI18N
+        btnGeoserverAdminConsole.setFocusable(false);
+        btnGeoserverAdminConsole.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnGeoserverAdminConsole.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnGeoserverAdminConsoleActionPerformed(evt);
+            }
+        });
+        jToolBar5.add(btnGeoserverAdminConsole);
+
+        txtGeoserverLog.setColumns(20);
+        txtGeoserverLog.setRows(5);
+        jScrollPane5.setViewportView(txtGeoserverLog);
+
+        javax.swing.GroupLayout tabGeoserverLayout = new javax.swing.GroupLayout(tabGeoserver);
+        tabGeoserver.setLayout(tabGeoserverLayout);
+        tabGeoserverLayout.setHorizontalGroup(
+            tabGeoserverLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addComponent(jToolBar5, javax.swing.GroupLayout.DEFAULT_SIZE, 552, Short.MAX_VALUE)
+            .addGroup(tabGeoserverLayout.createSequentialGroup()
+                .addContainerGap()
+                .addComponent(jScrollPane5)
+                .addContainerGap())
+        );
+        tabGeoserverLayout.setVerticalGroup(
+            tabGeoserverLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(tabGeoserverLayout.createSequentialGroup()
+                .addComponent(jToolBar5, javax.swing.GroupLayout.PREFERRED_SIZE, 25, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jScrollPane5, javax.swing.GroupLayout.DEFAULT_SIZE, 210, Short.MAX_VALUE)
+                .addContainerGap())
+        );
+
+        tabMain.addTab(bundle.getString("ControlCentre.tabGeoserver.TabConstraints.tabTitle"), new javax.swing.ImageIcon(getClass().getResource("/images/status-busy.png")), tabGeoserver); // NOI18N
+
         txtGlassfishLog.setEditable(false);
         txtGlassfishLog.setColumns(20);
         txtGlassfishLog.setRows(5);
@@ -594,6 +745,17 @@ public class ControlCentre extends javax.swing.JFrame {
             }
         });
         jToolBar3.add(btnGlassfishCopy);
+
+        btnGlassfishAdminConsole.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/eraser.png"))); // NOI18N
+        btnGlassfishAdminConsole.setText(bundle.getString("ControlCentre.btnGlassfishAdminConsole.text")); // NOI18N
+        btnGlassfishAdminConsole.setFocusable(false);
+        btnGlassfishAdminConsole.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnGlassfishAdminConsole.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnGlassfishAdminConsoleActionPerformed(evt);
+            }
+        });
+        jToolBar3.add(btnGlassfishAdminConsole);
 
         javax.swing.GroupLayout tabGlassfishLayout = new javax.swing.GroupLayout(tabGlassfish);
         tabGlassfish.setLayout(tabGlassfishLayout);
@@ -856,18 +1018,53 @@ public class ControlCentre extends javax.swing.JFrame {
         startDesktop();
     }//GEN-LAST:event_btnStartDesktopAActionPerformed
 
+    private void btnStartGeoserverActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnStartGeoserverActionPerformed
+        startGeoserver();
+    }//GEN-LAST:event_btnStartGeoserverActionPerformed
+
+    private void btnStopGeoserverActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnStopGeoserverActionPerformed
+        stopGeoserver();
+    }//GEN-LAST:event_btnStopGeoserverActionPerformed
+
+    private void btnGeoserverCopyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnGeoserverCopyActionPerformed
+        copyLog(txtGeoserverLog, "Geoserver");
+    }//GEN-LAST:event_btnGeoserverCopyActionPerformed
+
+    private void btnGeoserverAdminConsoleActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnGeoserverAdminConsoleActionPerformed
+       writeUserMessage("Opening Geoserver Admin Console at http://localhost:4849...");
+        if (Desktop.isDesktopSupported()) {
+            try {
+            Desktop.getDesktop().browse(new URI("http://localhost:4849"));
+            } catch (Exception ex) {}
+        }
+    }//GEN-LAST:event_btnGeoserverAdminConsoleActionPerformed
+
+    private void btnGlassfishAdminConsoleActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnGlassfishAdminConsoleActionPerformed
+        writeUserMessage("Opening Glassfish Admin Console at http://localhost:4848...");
+        if (Desktop.isDesktopSupported()) {
+            try {
+            Desktop.getDesktop().browse(new URI("http://localhost:4848"));
+            } catch (Exception ex) {}
+        }
+    }//GEN-LAST:event_btnGlassfishAdminConsoleActionPerformed
+
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JButton btnDatabaseCopy;
     private javax.swing.JButton btnDesktopCopy;
+    private javax.swing.JButton btnGeoserverAdminConsole;
+    private javax.swing.JButton btnGeoserverCopy;
+    private javax.swing.JButton btnGlassfishAdminConsole;
     private javax.swing.JButton btnGlassfishCopy;
     private javax.swing.JButton btnStartDB;
     private javax.swing.JButton btnStartDesktopA;
     private javax.swing.JButton btnStartDesktopB;
+    private javax.swing.JButton btnStartGeoserver;
     private javax.swing.JButton btnStartGlassfish;
     private javax.swing.JButton btnStartPgAdmin;
     private javax.swing.JButton btnStartServers;
     private javax.swing.JButton btnStopDB;
+    private javax.swing.JButton btnStopGeoserver;
     private javax.swing.JButton btnStopGlassfish;
     private javax.swing.JButton btnStopServers;
     private javax.swing.JButton btnWorkingDir;
@@ -880,7 +1077,10 @@ public class ControlCentre extends javax.swing.JFrame {
     private javax.swing.JScrollPane jScrollPane2;
     private javax.swing.JScrollPane jScrollPane3;
     private javax.swing.JScrollPane jScrollPane4;
+    private javax.swing.JScrollPane jScrollPane5;
     private javax.swing.JToolBar.Separator jSeparator1;
+    private javax.swing.JToolBar.Separator jSeparator10;
+    private javax.swing.JToolBar.Separator jSeparator11;
     private javax.swing.JToolBar.Separator jSeparator2;
     private javax.swing.JToolBar.Separator jSeparator3;
     private javax.swing.JToolBar.Separator jSeparator4;
@@ -893,12 +1093,15 @@ public class ControlCentre extends javax.swing.JFrame {
     private javax.swing.JToolBar jToolBar2;
     private javax.swing.JToolBar jToolBar3;
     private javax.swing.JToolBar jToolBar4;
+    private javax.swing.JToolBar jToolBar5;
     private javax.swing.JPanel tabDatabase;
     private javax.swing.JPanel tabDesktop;
+    private javax.swing.JPanel tabGeoserver;
     private javax.swing.JPanel tabGlassfish;
     private javax.swing.JTabbedPane tabMain;
     private javax.swing.JTextArea txtDatabaseLog;
     private javax.swing.JTextArea txtDesktopLog;
+    private javax.swing.JTextArea txtGeoserverLog;
     private javax.swing.JTextArea txtGlassfishLog;
     private javax.swing.JTextArea txtOut;
     // End of variables declaration//GEN-END:variables
