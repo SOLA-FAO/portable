@@ -203,6 +203,9 @@ public class ControlCentre extends javax.swing.JFrame {
                                 } else if (line.matches("(.*)waiting for server to start(.*)stopped waiting(.*)")) {
                                     writeUserMessage("Error starting the database. See the postgresql.log for details.");
                                     setDatabaseRunning(false);
+                                } else if (line.matches("(.*)waiting for server to shut down(.*)")
+                                        || line.matches("(.*)FATAL:  the database system is shutting down")) {
+                                    writeUserMessage(System.lineSeparator() + "*** Ensure all database connections are disconnected > Close down pgAdmin III ***");
                                 } else if (line.matches("(.*)pgadmin3.lng(.*)")) {
                                     // A fake error when starting pgAdmin. Don't display it in the log.
                                     line = null;
@@ -366,7 +369,8 @@ public class ControlCentre extends javax.swing.JFrame {
                                 + " Wait for Glassfish to complete its startup, then stop Glassfish and delete "
                                 + "the folder called generated in glassfish/glassfish/domains/domain1. "
                                 + "Once the generated folder is deleted, restart Glassfish again. " + System.lineSeparator());
-                    } else if (line.matches("(.*)Loading application sola-(.*)services-ear done in(.*)")) {
+                    } else if (line.matches("(.*)Loading application sola-(.*)services-ear(.*) done in(.*)")
+                            || line.matches("(.*)sola-(.*)services-ear(.*) was successfully deployed in(.*)")) {
                         // Checks when Glassfish is completely started up
                         writeUserMessage("Glassfish is now running");
                         setGlassfishRunning(true);
@@ -390,7 +394,8 @@ public class ControlCentre extends javax.swing.JFrame {
                         // Checks when Glassfish is completely started up
                         writeUserMessage("Geoserver is now running");
                         setGeoserverRunning(true);
-                    } else if (line.matches("(.*)Loading application sola-cs-services-ear done in(.*)")) {
+                    } else if (line.matches("(.*)Loading application sola-cs-services-ear done in(.*)")
+                            || line.matches("(.*)sola-cs-services-ear was successfully deployed in(.*)")) {
                         // Checks when Glassfish is completely started up
                         writeUserMessage("Community Server is now running");
                         setGeoserverRunning(true);
